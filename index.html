@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang ="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Security Roastering System</title>
+<link rel="stylesheet" href="css/style.css"/>
+</head>
+<body>
+<div class="container">
+<div class="card">
+<h1>Security Roastering &amp; Patrol Verification</h1>
+<p class="muted">Phase 1: setup check</p>
+<button id="testBtn">Test Supabase Connection</button>
+<p id="result" class="status"</p>
+    <p><a href="login.html">Login</a>.<a href=""dashboard.html">Dashboard</a></p>
+    </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+    <script src="js/supabaseClient.js"></script>
+    <script>
+        const result = document.getElementById("result");
+        document.getElementById("testBtn").addEventListener("click", async () => {
+            result.textContent = "checking....";
+            result.className = "status";
+            try {
+                await checkSupabaseConnection();
+                result.textContent = "Connected to supabase.";
+                result.className = "status ok";
+            } catch (err) {
+                result.textContent = "Connection failed: " + err.message;
+                result.className = "status bad";
+            }
+        })
+    </script>
+    </body>
+</html>

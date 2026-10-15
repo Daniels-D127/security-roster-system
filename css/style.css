@@ -1,0 +1,36 @@
+:root {
+    --bg: #f4f6f9;
+    --card: #ffffff;
+    --text: #1c2430;
+    --muted: #6b7686;
+    --primary: #1f4e8c;
+    --ok:#1e8e3e;
+    --bad: #c62828;
+}
+* { box-sizing:border-box; }
+body {
+    margin:0;
+    font-family: system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+}
+.container { max-width: 720px; margin: 0 auto; padding: 1rem; }
+.card {
+    background: var(--card);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+}
+button {
+    background: var(--primary);
+    color:#fff;
+    border:0;
+    border-radius:6px;
+    padding:.6rem 1rem;
+    font-size:1rem;
+    cursor:pointer;
+}
+.status.ok { color: var(--ok);}
+.status.bad { color: var(--bad);}
+.muted { color:var(--muted);}
