@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Reports</title>
+        <link rel="stylesheet" href="../css/style.css"/>
+    </head>
+    <body>
+        <main class="container">
+            <h1>Reports</h1>
+            <div class="card no-print">
+                <div class="row">
+                    <div><label>From</label><input type="date"/></div>
+                    <div><label>To</label><input type="date"/></div>
+                    <div><label>Site</label><select><option>All sites</option><option>Demo Mall</option></select></div>
+                </div>
+                <button onclick="window.print()">Print report</button>
+            </div>
+            <div class="card">
+                <h2>Patrol summary</h2>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>Site</th><th>Rounds</th><th>Completed</th><th>Incomplete</th></tr>
+                        <tr><td>Demo Mall</td><td>12</td><td>11</td><td>1</td></tr>
+                        <tr><td>Demo Warehouse</td><td>8</td><td>8</td><td>0</td></tr>
+                    </table>
+                </div>
+            </div>
+        </main>
+        <script src="../js/layout.js"></script>
+    </body>
+</html>

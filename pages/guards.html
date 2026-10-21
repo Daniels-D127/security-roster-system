@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Guards</title>
+        <link rel="stylesheet" href="../css/style.css"/>
+    </head>
+    <body>
+        <main class="container">
+            <h1>Guards</h1>
+            <div class="card no-print">
+                <h2>Add guard</h2>
+                <div class="row">
+                    <div><label>Full name</label><input placeholder="Guard name"/></div>
+                    <div><label>Guard code</label><input placeholder="G-004"/></div>
+                    <div><label>Phone</label><input placeholder="0700000000"/></div>
+                </div>
+                <button>Save guard</button>
+            </div>
+            <div class="card">
+                <h2>All guards</h2>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>Code</th><th>Name</th><th>Phone</th><th>Status</th></tr>
+                        <tr><td>G-001</td><td>Guard A</td><td>0700000001</td><td><span class="badge ok">Active</span></td></tr>
+                        <tr><td>G-002</td><td>Guard B</td><td>0700000002</td><td><span class="badge ok">Active</span></td></tr>
+                        <tr><td>G-003</td><td>Guard C</td><td>0700000003</td><td><span class="badge bad">Inactive</span></td></tr>
+                    </table>
+                </div>
+            </div>
+        </main>
+        <script src="../js/layout.js"></script>
+    </body>
+</html>

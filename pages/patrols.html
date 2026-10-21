@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Patrols</title>
+        <link rel="stylesheet" href="../css/style.css"/>
+    </head>
+    <body>
+        <main class="container">
+            <h1>Patrols</h1>
+            <div class="card no-print">
+                <h2>Scan checkpoint</h2>
+                <p class="muted">QR scanner comes in phase 7.</p>
+                <button>Start patrol round</button> <button class="secondary">Scan QR</button>
+            </div>
+            <div class="card">
+                <h2>Patrol rounds</h2>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>Guard</th><th>Started</th><th>Visited</th><th>Status</th></tr>
+                        <tr><td>Guard A</td><td>08:00</td><td>3 of 3</td><td><span class="badge ok">Completed</span></td></tr>
+                        <tr><td>Guard A</td><td>10:00</td><td>2 of 3</td><td><span class="badge bad">Incomplete</span></td></tr>
+                    </table>
+                </div>
+            </div>
+        </main>
+        <script src="../js/layout.js"></script>
+    </body>
+</html>

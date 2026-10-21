@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang ="en">
+<html lang="en">
     <head>
         <meta charset="UTF-8"/>
         <meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -7,12 +7,41 @@
         <link rel="stylesheet" href="css/style.css"/>
     </head>
     <body>
-        <div class="container">
-            <div class="card">
-                <h1>Dashboard</h1>
-                <p class="muted">Coming in a later phase</p>
-                <a href="index.html">Back</a>
+        <main class="container">
+            <h1>Dashboard</h1>
+            <p class="muted">Sample numbers only. Real data comes in phase 9.</p>
+
+            <div class="grid" style="margin-bottom:1rem">
+                <div class="stat"><div class="num">8</div><div class="label">Guard on duty</div></div>
+                <div class="stat"><div class="num">3</div><div class="label">Upcoming shifts</div></div>
+                <div class="stat"><div class="num">1</div><div class="label">Unfilled shifts</div></div>
+                <div class="stat"><div class="num">92%</div><div class="label">Patrol completion</div></div>
+                <div class="stat"><div class="num">2</div><div class="label">Open incidents</div></div>
             </div>
-        </div>
+
+            <div class="card">
+                <h2>Today's shifts</h2>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>Site</th><th>Time</th><th>Guard</th><th>Status</th></tr>
+                        <tr><td>Demo Mall</td><td>06:00 - 14:00</td><td>Guard A</td><td><span class="badge ok">Checked in</span></td></tr>
+                        <tr><td>Demo Mall</td><td>14:00 - 22:00</td><td>Guard B</td><td><span class="badge warn">Upcoming</span></td></tr>
+                        <tr><td>Demo Warehouse</td><td>22:00 - 06:00</td><td>-</td><td><span class="badge bad">Unfilled</span></td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <div class="card">
+                <h2>Exceptions</h2>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>Type</th><th>Site</th><th>Detail</th></tr>
+                        <tr><td><span class="badge bad">Missed patrol</span></td><td>Demo Mall</td><td>Back Entrance not visited</td></tr>
+                        <tr><td><span class="badge warn">Late check-in</span></td><td>Demo Mall</td><td>Guard A, 12 min late</td></tr>
+                    </table>
+                </div>
+            </div>
+        </main>
+        <script src="js/layout.js"></script>
     </body>
 </html>

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8"/>
+        <meta name="viewport" content="width=device-width, initial-scale=1"/>
+        <title>Attendance</title>
+        <link rel="stylesheet" href="../css/style.css"/>
+    </head>
+    <body>
+        <main class="container">
+            <h1>Attendance</h1>
+            <div class="card">
+                <div class="no-print" style="margin-left: .75rem;">
+                    <button>Check in</button> <button class="secondary">Check out</button>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <tr><th>Guard</th><th>Site</th><th>Check in</th><th>Check out</th><th>Status</th></tr>
+                        <tr><td>Guard A</td><td>Demo Mall</td><td>06:12</td><td>-</td><td><span class="badge warn">Late</span></td></tr>
+                        <tr><td>Guard B</td><td>Demo Mall</td><td>13:58</td><td>22:01</td><td><span class="badge ok">Present</span></td></tr>
+                    </table>
+                </div>
+            </div>
+        </main>
+        <script src="../js/layout.js"></script>
+    </body>
+</html>
