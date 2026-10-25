@@ -7,19 +7,56 @@
         <link rel="stylesheet" href="css/style.css"/>
     </head>
     <body>
-
         <div class="container login-box">
             <div class="card">
                 <h1>Sign in</h1>
-                <p class="muted">Prototype screen. Real login comes in Phase 4.</p>
                 <label for="email">Email</label>
-                <input id="email" type="email" placeholder="name@example.com"/>
+                <input id="email" type="email" autocomplete="username"/>
                 <br/><br/>
                 <label for="password">Password</label>
-                <input id="password" type="password"/>
+                <input id="password" type="password" autocomplete="current-password"/>
                 <br/><br/>
-                <button onclick="location.href='dashboard.html'">Log in</button>
+                <button id="loginBtn">Log in</button>
+                <p id="msg" class="status"></p>
             </div>
         </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+        <script src="js/supabaseClient.js"></script>
+        <script>
+            const msg = document.getElementById("msg");
+            const btn = document.getElementById("loginBtn");
+
+            function showError(text) {
+                msg.textContent = text;
+                msg.className = "status bad";
+            }
+
+            if (new URLSearchParams(location.search).get("error") === "noprofile") {
+                showError("This account has no active profile. Ask an administrator.");
+            }
+
+            supabaseClient.auth.getSession().then(({data}) => {
+                if (data.session) location.href = "dashboard.html";
+            });
+
+            btn.addEventListener("click", async () => {
+                msg.textContent = "";
+                const email = document.getElementById("email").value.trim();
+                const password = document.getElementById("password").value;
+                if (!email || !password) {
+                    showError("Enter your email and pssword");
+                    return;
+                }
+                btn.disabled = true;
+                const {error} = await supabaseClient.auth.signInWithPassword({ email, password});
+                btn.disabled = false;
+                if (error) {
+                    showError("Login failed: " + error.message);
+                    return;
+                }
+                location.href = "dashboard.html";
+            });
+        </script>
     </body>
 </html>

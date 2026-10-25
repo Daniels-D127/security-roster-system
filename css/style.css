@@ -54,3 +54,4 @@ button.secondary { background: #fff; color: var(--primary); border: 1px solid va
 .login-box { max-width: 380px; margin: 8vh auto;}
 
 @media print { .topbar, .nav, .no-print { display: none;} body { background: #fff;}}
+.topbar .who { margin-right: .75rem; font-size: .85rem;}
