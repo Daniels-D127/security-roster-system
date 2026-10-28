@@ -1,37 +1,230 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Rosters</title>
-        <link rel="stylesheet" href="../css/style.css"/>
-    </head>
-    <body>
-        <main class="container">
-            <h1>Rosters</h1>
-            <div class="card no-print">
-                <h2>Create shifts</h2>
-                <div class="row">
-                    <div><label>site</label><select><option>Demo Mall</option><option>Demo Warehouse</option></select></div>
-                    <div><label>Start</label><input type="datetime-local"/></div>
-                    <div><label>End</label><input type="datetime-local"/></div>
-                    <div><label>Guard</label><select><option>Guard A</option><option>Guard B</option></select></div>
-                </div>
-                <button>Save shift</button>
-            </div>
-            <div class="card">
-                <h2>Upcoming shifts</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr><th>Site</th><th>Start</th><th>End</th><th>Guard</th><th>Coverage</th></tr>
-                        <tr><td>Demo Mall</td><td>Mon 06:00</td><td>Mon 14:00</td><td>Guard A</td><td><span class="badge ok">Filled</span></td></tr>
-                        <tr><td>Demo Warehouse</td><td>Mon 22:00</td><td>Tue 06:00</td><td>-</td><td><span class="badge bad">Unfilled</span></td></tr>
-                    </table>
-                </div>
-            </div>
-        </main>
-        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-        <script src="../js/supabaseClient.js"></script>
-        <script src="../js/layout.js"></script>
-    </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rosters</title>
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1 id="title">Rosters</h1>
+    <p class="muted" id="note" hidden>Only supervisors can create or change rosters.</p>
+
+    <div class="grid" style="margin-bottom:1rem">
+      <div class="stat"><div class="num" id="statUpcoming">–</div><div class="label">Upcoming shifts</div></div>
+      <div class="stat"><div class="num" id="statUnfilled">–</div><div class="label">Unfilled shifts</div></div>
+    </div>
+
+    <div class="card no-print" id="formCard" hidden>
+      <h2 id="formTitle">Create shift</h2>
+      <div class="row">
+        <div><label for="site">Site</label><select id="site"></select></div>
+        <div><label for="start">Start</label><input id="start" type="datetime-local" /></div>
+        <div><label for="end">End</label><input id="end" type="datetime-local" /></div>
+        <div id="guardWrap"><label for="guard">Guard (optional)</label><select id="guard"></select></div>
+      </div>
+      <button id="saveBtn">Save shift</button>
+      <button id="cancelBtn" class="secondary" hidden>Cancel edit</button>
+    </div>
+
+    <p id="msg" class="status"></p>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.75rem">
+        <h2 style="margin:0">Shifts</h2>
+        <select id="filter" style="width:auto">
+          <option value="upcoming">Upcoming</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Site</th><th>Start</th><th>End</th><th>Guard</th><th>Coverage</th><th id="actionsTh" class="no-print"></th></tr>
+          </thead>
+          <tbody id="rows"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="../js/supabaseClient.js"></script>
+  <script src="../js/util.js"></script>
+  <script src="../js/layout.js"></script>
+  <script>
+    pageReady.then(async (profile) => {
+      if (!profile) return;
+      const isSupervisor = profile.role === "supervisor";
+      const $ = (id) => document.getElementById(id);
+      const msg = $("msg");
+      let shifts = [];
+      let guards = [];
+      let editingId = null;
+
+      if (profile.role === "guard") $("title").textContent = "My shifts";
+      if (profile.role === "admin") $("note").hidden = false;
+      if (isSupervisor) $("formCard").hidden = false;
+      else $("actionsTh").hidden = true;
+
+      const activeAssignments = (s) =>
+        s.assignments.filter((a) => a.assignment_status === "assigned");
+
+      function guardOptions() {
+        return guards.map((g) =>
+          `<option value="${esc(g.id)}">${esc(g.profile?.full_name)} (${esc(g.guard_code)})</option>`
+        ).join("");
+      }
+
+      async function loadLookups() {
+        if (!isSupervisor) return;
+        const [sitesRes, guardsRes] = await Promise.all([
+          supabaseClient.from("client_sites").select("id, site_name").eq("status", "active").order("site_name"),
+          supabaseClient.from("guards").select("id, guard_code, profile:profiles(full_name)").eq("status", "active").order("guard_code"),
+        ]);
+        const err = sitesRes.error || guardsRes.error;
+        if (err) { showMsg(msg, friendlyError(err), false); return; }
+        guards = guardsRes.data;
+        $("site").innerHTML = sitesRes.data
+          .map((s) => `<option value="${esc(s.id)}">${esc(s.site_name)}</option>`).join("");
+        $("guard").innerHTML = '<option value="">None (leave unfilled)</option>' + guardOptions();
+      }
+
+      async function loadShifts() {
+        const { data, error } = await supabaseClient
+          .from("shifts")
+          .select("id, site_id, start_time, end_time, site:client_sites(site_name), assignments:shift_assignments(id, assignment_status, guard:guards(id, guard_code, profile:profiles(full_name)))")
+          .neq("status", "cancelled")
+          .order("start_time");
+        if (error) {
+          $("rows").innerHTML = `<tr><td colspan="6" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+        shifts = data;
+        render();
+      }
+
+      function render() {
+        const now = new Date();
+        const upcoming = shifts.filter((s) => new Date(s.end_time) > now);
+        $("statUpcoming").textContent = upcoming.length;
+        $("statUnfilled").textContent = upcoming.filter((s) => activeAssignments(s).length === 0).length;
+
+        const list = $("filter").value === "all" ? shifts : upcoming;
+        if (!list.length) {
+          $("rows").innerHTML = '<tr><td colspan="6" class="muted">No shifts to show.</td></tr>';
+          return;
+        }
+
+        $("rows").innerHTML = list.map((s) => {
+          const active = activeAssignments(s);
+          const names = active.length
+            ? active.map((a) => `<div>${esc(a.guard?.profile?.full_name)} ${
+                isSupervisor
+                  ? `<button class="secondary" style="padding:.1rem .45rem;font-size:.8rem" data-unassign="${esc(a.id)}">Remove</button>`
+                  : ""}</div>`).join("")
+            : "—";
+          const actions = isSupervisor
+            ? `<td class="no-print">
+                 <select data-pick="${esc(s.id)}" style="width:auto">${guardOptions()}</select>
+                 <button class="secondary" data-assign="${esc(s.id)}">Assign</button>
+                 <button class="secondary" data-edit="${esc(s.id)}">Edit</button>
+               </td>`
+            : "";
+          return `<tr>
+            <td>${esc(s.site?.site_name)}</td>
+            <td>${esc(fmtDateTime(s.start_time))}</td>
+            <td>${esc(fmtDateTime(s.end_time))}</td>
+            <td>${names}</td>
+            <td><span class="badge ${active.length ? "ok" : "bad"}">${active.length ? "Filled" : "Unfilled"}</span></td>
+            ${actions}</tr>`;
+        }).join("");
+      }
+
+      // Run a database call, show the result, refresh the list
+      async function run(call, okText) {
+        const { error } = await call();
+        if (error) { showMsg(msg, friendlyError(error), false); return false; }
+        showMsg(msg, okText, true);
+        await loadShifts();
+        return true;
+      }
+
+      function resetForm() {
+        editingId = null;
+        $("formTitle").textContent = "Create shift";
+        $("start").value = "";
+        $("end").value = "";
+        $("guard").value = "";
+        $("guardWrap").hidden = false;
+        $("cancelBtn").hidden = true;
+      }
+
+      function startEdit(id) {
+        const s = shifts.find((x) => x.id === id);
+        if (!s) return;
+        editingId = id;
+        if (![...$("site").options].some((o) => o.value === s.site_id)) {
+          $("site").insertAdjacentHTML("beforeend",
+            `<option value="${esc(s.site_id)}">${esc(s.site?.site_name)}</option>`);
+        }
+        $("formTitle").textContent = "Edit shift";
+        $("site").value = s.site_id;
+        $("start").value = toLocalInput(s.start_time);
+        $("end").value = toLocalInput(s.end_time);
+        $("guardWrap").hidden = true;
+        $("cancelBtn").hidden = false;
+        $("formCard").scrollIntoView({ behavior: "smooth" });
+      }
+
+      $("saveBtn").addEventListener("click", async () => {
+        const siteId = $("site").value;
+        const start = $("start").value;
+        const end = $("end").value;
+        if (!siteId || !start || !end) {
+          showMsg(msg, "Choose a site, a start time and an end time.", false);
+          return;
+        }
+        if (new Date(end) <= new Date(start)) {
+          showMsg(msg, "End time must be after start time.", false);
+          return;
+        }
+        const p_start = new Date(start).toISOString();
+        const p_end = new Date(end).toISOString();
+
+        $("saveBtn").disabled = true;
+        const ok = editingId
+          ? await run(() => supabaseClient.rpc("update_shift",
+              { p_shift_id: editingId, p_site_id: siteId, p_start, p_end }), "Shift updated.")
+          : await run(() => supabaseClient.rpc("create_shift",
+              { p_site_id: siteId, p_start, p_end, p_guard_id: $("guard").value || null }), "Shift created.");
+        $("saveBtn").disabled = false;
+        if (ok) resetForm();
+      });
+
+      $("cancelBtn").addEventListener("click", () => { resetForm(); msg.textContent = ""; });
+      $("filter").addEventListener("change", render);
+
+      $("rows").addEventListener("click", async (e) => {
+        const d = e.target.dataset;
+        if (d.edit) startEdit(d.edit);
+        if (d.assign) {
+          const guardId = document.querySelector(`select[data-pick="${d.assign}"]`).value;
+          if (!guardId) { showMsg(msg, "Choose a guard first.", false); return; }
+          await run(() => supabaseClient.rpc("assign_guard",
+            { p_shift_id: d.assign, p_guard_id: guardId }), "Guard assigned.");
+        }
+        if (d.unassign) {
+          if (!confirm("Remove this guard from the shift?")) return;
+          await run(() => supabaseClient.rpc("unassign_guard",
+            { p_assignment_id: d.unassign }), "Guard removed.");
+        }
+      });
+
+      await loadLookups();
+      await loadShifts();
+    });
+  </script>
+</body>
 </html>
