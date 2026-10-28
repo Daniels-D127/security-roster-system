@@ -1,38 +1,263 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Sites</title>
-        <link rel="stylesheet" href="../css/style.css"/>
-    </head>
-    <body>
-        <main class="container">
-            <h1>Sites and checkpoints</h1>
-            <div class="card">
-                <h2>Client sites</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr><th>Code</th><th>Name</th><th>Address</th><th>Status</th></tr>
-                        <tr><td>SITE-001</td><td>Demo Mall</td><td>Fictional Road</td><td><span class="badge ok">Active</span></td></tr>
-                        <tr><td>SITE-002</td><td>Demo Warehouse</td><td>5 Sample Street</td><td><span class="badge ok">Active</span></td></tr>
-                    </table>
-                </div>
-            </div>
-            <div class="card">
-                <h2>Checkpoints: Demo Mall</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr><th>Code</th><th>QR token</th><>Status</th></tr>
-                        <tr><td>Main Gate</td><td>a1b2c3...</td><td><span class="badge ok">Active</span></td></tr>
-                        <tr><td>Parking Lot</td><td>d4e5f6...</td><td><span class="badge ok">Active</span></td></tr>
-                        <tr><td>Back Entrance</td><td>g7h8i9...</td><td><span class="badge ok">Active</span></td></tr>
-                    </table>
-                </div>
-            </div>
-        </main>
-        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-        <script src="../js/supabaseClient.js"></script>
-        <script src="../js/layout.js"></script>
-    </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sites</title>
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Sites and checkpoints</h1>
+
+    <div class="card no-print" id="siteFormCard" hidden>
+      <h2 id="siteFormTitle">Add site</h2>
+      <div class="row">
+        <div><label for="siteName">Site name</label><input id="siteName" /></div>
+        <div><label for="siteCode">Site code</label><input id="siteCode" placeholder="SITE-003" /></div>
+        <div><label for="address">Address</label><input id="address" /></div>
+      </div>
+      <button id="siteSaveBtn">Save site</button>
+      <button id="siteCancelBtn" class="secondary" hidden>Cancel edit</button>
+      <p id="siteMsg" class="status"></p>
+    </div>
+
+    <div class="card">
+      <h2>Client sites</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Code</th><th>Name</th><th>Address</th><th>Status</th><th class="no-print"></th></tr></thead>
+          <tbody id="siteRows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="cpCard" hidden>
+      <h2 id="cpTitle">Checkpoints</h2>
+      <div class="no-print" id="cpForm" hidden style="margin-bottom:.75rem">
+        <div class="row">
+          <div><label for="cpName">New checkpoint name</label><input id="cpName" placeholder="Roof Access" /></div>
+        </div>
+        <button id="cpAddBtn">Add checkpoint</button>
+      </div>
+      <p id="cpMsg" class="status"></p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Name</th><th>QR token</th><th>Status</th><th id="cpActionsTh" class="no-print"></th></tr></thead>
+          <tbody id="cpRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="../js/supabaseClient.js"></script>
+  <script src="../js/util.js"></script>
+  <script src="../js/layout.js"></script>
+  <script>
+    pageReady.then(async (profile) => {
+      if (!profile) return;
+      const isAdmin = profile.role === "admin";
+      const $ = (id) => document.getElementById(id);
+      const siteMsg = $("siteMsg");
+      const cpMsg = $("cpMsg");
+      let sites = [];
+      let checkpoints = [];
+      let editingSiteId = null;
+      let selectedSite = null;
+
+      if (isAdmin) {
+        $("siteFormCard").hidden = false;
+        $("cpForm").hidden = false;
+      } else {
+        $("cpActionsTh").hidden = true;
+      }
+
+      // ---------- Sites ----------
+      async function loadSites() {
+        const { data, error } = await supabaseClient
+          .from("client_sites")
+          .select("id, site_name, site_code, address, status")
+          .order("site_code");
+        if (error) {
+          $("siteRows").innerHTML = `<tr><td colspan="5" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+        sites = data;
+        renderSites();
+      }
+
+      function renderSites() {
+        if (!sites.length) {
+          $("siteRows").innerHTML = '<tr><td colspan="5" class="muted">No sites yet.</td></tr>';
+          return;
+        }
+        $("siteRows").innerHTML = sites.map((s) => {
+          const active = s.status === "active";
+          const adminBtns = isAdmin
+            ? `<button class="secondary" data-edit="${esc(s.id)}">Edit</button>
+               <button class="secondary" data-toggle="${esc(s.id)}">${active ? "Deactivate" : "Activate"}</button>`
+            : "";
+          return `<tr>
+            <td>${esc(s.site_code)}</td>
+            <td>${esc(s.site_name)}</td>
+            <td>${esc(s.address || "—")}</td>
+            <td><span class="badge ${active ? "ok" : "bad"}">${active ? "Active" : "Inactive"}</span></td>
+            <td class="no-print">
+              <button class="secondary" data-cp="${esc(s.id)}">Checkpoints</button>
+              ${adminBtns}
+            </td></tr>`;
+        }).join("");
+      }
+
+      function resetSiteForm() {
+        editingSiteId = null;
+        $("siteFormTitle").textContent = "Add site";
+        $("siteName").value = "";
+        $("siteCode").value = "";
+        $("address").value = "";
+        $("siteCancelBtn").hidden = true;
+      }
+
+      function startSiteEdit(id) {
+        const s = sites.find((x) => x.id === id);
+        if (!s) return;
+        editingSiteId = id;
+        $("siteFormTitle").textContent = "Edit site";
+        $("siteName").value = s.site_name;
+        $("siteCode").value = s.site_code;
+        $("address").value = s.address || "";
+        $("siteCancelBtn").hidden = false;
+        $("siteFormCard").scrollIntoView({ behavior: "smooth" });
+      }
+
+      $("siteSaveBtn").addEventListener("click", async () => {
+        const site_name = $("siteName").value.trim();
+        const site_code = $("siteCode").value.trim();
+        const address = $("address").value.trim() || null;
+        if (!site_name || !site_code) {
+          showMsg(siteMsg, "Site name and code are required.", false);
+          return;
+        }
+        const payload = { site_name, site_code, address };
+        $("siteSaveBtn").disabled = true;
+        const { data, error } = editingSiteId
+          ? await supabaseClient.from("client_sites").update(payload).eq("id", editingSiteId).select()
+          : await supabaseClient.from("client_sites").insert(payload).select();
+        $("siteSaveBtn").disabled = false;
+
+        if (error) { showMsg(siteMsg, friendlyError(error), false); return; }
+        if (!data || !data.length) { showMsg(siteMsg, "Not allowed, or the site was not found.", false); return; }
+        showMsg(siteMsg, editingSiteId ? "Site updated." : "Site added.", true);
+        resetSiteForm();
+        await loadSites();
+      });
+
+      $("siteCancelBtn").addEventListener("click", () => { resetSiteForm(); siteMsg.textContent = ""; });
+
+      async function toggleSite(id) {
+        const s = sites.find((x) => x.id === id);
+        if (!s) return;
+        const makeActive = s.status !== "active";
+        if (!makeActive && !confirm(`Deactivate ${s.site_name}?`)) return;
+        const { data, error } = await supabaseClient
+          .from("client_sites")
+          .update({ status: makeActive ? "active" : "inactive" })
+          .eq("id", id)
+          .select();
+        if (error) { showMsg(siteMsg, friendlyError(error), false); return; }
+        if (!data || !data.length) { showMsg(siteMsg, "Not allowed.", false); return; }
+        showMsg(siteMsg, makeActive ? "Site activated." : "Site deactivated.", true);
+        await loadSites();
+      }
+
+      $("siteRows").addEventListener("click", (e) => {
+        const d = e.target.dataset;
+        if (d.edit) startSiteEdit(d.edit);
+        if (d.toggle) toggleSite(d.toggle);
+        if (d.cp) openCheckpoints(d.cp);
+      });
+
+      // ---------- Checkpoints ----------
+      async function openCheckpoints(siteId) {
+        selectedSite = sites.find((s) => s.id === siteId);
+        if (!selectedSite) return;
+        $("cpCard").hidden = false;
+        $("cpTitle").textContent = `Checkpoints: ${selectedSite.site_name}`;
+        cpMsg.textContent = "";
+        await loadCheckpoints();
+        $("cpCard").scrollIntoView({ behavior: "smooth" });
+      }
+
+      async function loadCheckpoints() {
+        const { data, error } = await supabaseClient
+          .from("checkpoints")
+          .select("id, checkpoint_name, qr_token, active")
+          .eq("site_id", selectedSite.id)
+          .order("checkpoint_name");
+        if (error) { showMsg(cpMsg, friendlyError(error), false); return; }
+        checkpoints = data;
+        renderCheckpoints();
+      }
+
+      function renderCheckpoints() {
+        if (!checkpoints.length) {
+          $("cpRows").innerHTML = '<tr><td colspan="4" class="muted">No checkpoints yet.</td></tr>';
+          return;
+        }
+        $("cpRows").innerHTML = checkpoints.map((c) => {
+          const actions = isAdmin
+            ? `<td class="no-print">
+                 <button class="secondary" data-rename="${esc(c.id)}">Rename</button>
+                 <button class="secondary" data-cptoggle="${esc(c.id)}">${c.active ? "Deactivate" : "Activate"}</button>
+               </td>`
+            : "";
+          return `<tr>
+            <td>${esc(c.checkpoint_name)}</td>
+            <td>${esc(c.qr_token.slice(0, 8))}…</td>
+            <td><span class="badge ${c.active ? "ok" : "bad"}">${c.active ? "Active" : "Inactive"}</span></td>
+            ${actions}</tr>`;
+        }).join("");
+      }
+
+      $("cpAddBtn").addEventListener("click", async () => {
+        const checkpoint_name = $("cpName").value.trim();
+        if (!checkpoint_name) { showMsg(cpMsg, "Enter a checkpoint name.", false); return; }
+        const { data, error } = await supabaseClient
+          .from("checkpoints")
+          .insert({ site_id: selectedSite.id, checkpoint_name })
+          .select();
+        if (error) { showMsg(cpMsg, friendlyError(error), false); return; }
+        if (!data || !data.length) { showMsg(cpMsg, "Not allowed.", false); return; }
+        $("cpName").value = "";
+        showMsg(cpMsg, "Checkpoint added with a new QR token.", true);
+        await loadCheckpoints();
+      });
+
+      async function updateCheckpoint(id, changes, okText) {
+        const { data, error } = await supabaseClient
+          .from("checkpoints").update(changes).eq("id", id).select();
+        if (error) { showMsg(cpMsg, friendlyError(error), false); return; }
+        if (!data || !data.length) { showMsg(cpMsg, "Not allowed.", false); return; }
+        showMsg(cpMsg, okText, true);
+        await loadCheckpoints();
+      }
+
+      $("cpRows").addEventListener("click", (e) => {
+        const d = e.target.dataset;
+        if (d.rename) {
+          const c = checkpoints.find((x) => x.id === d.rename);
+          const name = prompt("New checkpoint name:", c.checkpoint_name);
+          if (name && name.trim()) updateCheckpoint(c.id, { checkpoint_name: name.trim() }, "Checkpoint renamed.");
+        }
+        if (d.cptoggle) {
+          const c = checkpoints.find((x) => x.id === d.cptoggle);
+          updateCheckpoint(c.id, { active: !c.active }, c.active ? "Checkpoint deactivated." : "Checkpoint activated.");
+        }
+      });
+
+      await loadSites();
+    });
+  </script>
+</body>
 </html>

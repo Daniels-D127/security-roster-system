@@ -74,12 +74,14 @@ if (here && !here[2].includes(profile.role)) {
 
 renderNav(profile);
 document.body.style.visibility = "visible";
+return profile;
 }
 
-initPage().catch((err) => {
+const pageReady = initPage().catch((err) => {
     document.body.style.visibility = "visible";
-    document.body.insertAdjacentHTML(
-        "afterbegin",
-        `<pre style="color:red;padding:1rem">Errorr: ${err.message}</pre>`
-    );
+    const pre = document.createElement("pre");
+    pre.style.cssText = "color:red;padding:1rem";
+    pre.textContent = "Error: " + err.message;
+    document.body.prepend(pre);
+    return null;
 });

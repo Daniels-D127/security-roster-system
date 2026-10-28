@@ -1,37 +1,181 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Guards</title>
-        <link rel="stylesheet" href="../css/style.css"/>
-    </head>
-    <body>
-        <main class="container">
-            <h1>Guards</h1>
-            <div class="card no-print">
-                <h2>Add guard</h2>
-                <div class="row">
-                    <div><label>Full name</label><input placeholder="Guard name"/></div>
-                    <div><label>Guard code</label><input placeholder="G-004"/></div>
-                    <div><label>Phone</label><input placeholder="0700000000"/></div>
-                </div>
-                <button>Save guard</button>
-            </div>
-            <div class="card">
-                <h2>All guards</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr><th>Code</th><th>Name</th><th>Phone</th><th>Status</th></tr>
-                        <tr><td>G-001</td><td>Guard A</td><td>0700000001</td><td><span class="badge ok">Active</span></td></tr>
-                        <tr><td>G-002</td><td>Guard B</td><td>0700000002</td><td><span class="badge ok">Active</span></td></tr>
-                        <tr><td>G-003</td><td>Guard C</td><td>0700000003</td><td><span class="badge bad">Inactive</span></td></tr>
-                    </table>
-                </div>
-            </div>
-        </main>
-        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-        <script src="../js/supabaseClient.js"></script>
-        <script src="../js/layout.js"></script>
-    </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Guards</title>
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Guards</h1>
+
+    <div class="card no-print" id="formCard" hidden>
+      <h2 id="formTitle">Register guard</h2>
+      <p class="muted" id="formHelp">First create the guard's login in Supabase (Authentication → Users), then register it here with the same email.</p>
+      <div class="row">
+        <div id="emailWrap"><label for="email">Login email</label><input id="email" type="email" /></div>
+        <div><label for="fullName">Full name</label><input id="fullName" /></div>
+        <div><label for="guardCode">Guard code</label><input id="guardCode" placeholder="G-002" /></div>
+        <div><label for="phone">Phone</label><input id="phone" /></div>
+      </div>
+      <button id="saveBtn">Register guard</button>
+      <button id="cancelBtn" class="secondary" hidden>Cancel edit</button>
+      <p id="msg" class="status"></p>
+    </div>
+
+    <div class="card">
+      <h2>All guards</h2>
+      <input id="search" placeholder="Search by name or code" />
+      <br /><br />
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Code</th><th>Name</th><th>Phone</th><th>Status</th><th id="actionsTh" class="no-print"></th></tr></thead>
+          <tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="../js/supabaseClient.js"></script>
+  <script src="../js/util.js"></script>
+  <script src="../js/layout.js"></script>
+  <script>
+    pageReady.then(async (profile) => {
+      if (!profile) return;
+      const isAdmin = profile.role === "admin";
+      const $ = (id) => document.getElementById(id);
+      const msg = $("msg");
+      let guards = [];
+      let editingId = null;
+
+      if (isAdmin) $("formCard").hidden = false;
+      else $("actionsTh").hidden = true;
+
+      async function loadGuards() {
+        const { data, error } = await supabaseClient
+          .from("guards")
+          .select("id, guard_code, phone, status, profile:profiles(full_name)")
+          .order("guard_code");
+        if (error) {
+          $("rows").innerHTML = `<tr><td colspan="5" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+        guards = data;
+        render();
+      }
+
+      function render() {
+        const q = $("search").value.trim().toLowerCase();
+        const list = guards.filter((g) =>
+          !q ||
+          g.guard_code.toLowerCase().includes(q) ||
+          (g.profile?.full_name || "").toLowerCase().includes(q));
+
+        if (!list.length) {
+          $("rows").innerHTML = '<tr><td colspan="5" class="muted">No guards found.</td></tr>';
+          return;
+        }
+        $("rows").innerHTML = list.map((g) => {
+          const active = g.status === "active";
+          const actions = isAdmin
+            ? `<td class="no-print">
+                 <button class="secondary" data-edit="${esc(g.id)}">Edit</button>
+                 <button class="secondary" data-toggle="${esc(g.id)}">${active ? "Deactivate" : "Activate"}</button>
+               </td>`
+            : "";
+          return `<tr>
+            <td>${esc(g.guard_code)}</td>
+            <td>${esc(g.profile?.full_name)}</td>
+            <td>${esc(g.phone || "—")}</td>
+            <td><span class="badge ${active ? "ok" : "bad"}">${active ? "Active" : "Inactive"}</span></td>
+            ${actions}</tr>`;
+        }).join("");
+      }
+
+      function resetForm() {
+        editingId = null;
+        $("formTitle").textContent = "Register guard";
+        $("formHelp").hidden = false;
+        $("emailWrap").hidden = false;
+        $("email").value = "";
+        $("fullName").value = "";
+        $("guardCode").value = "";
+        $("phone").value = "";
+        $("saveBtn").textContent = "Register guard";
+        $("cancelBtn").hidden = true;
+      }
+
+      function startEdit(id) {
+        const g = guards.find((x) => x.id === id);
+        if (!g) return;
+        editingId = id;
+        $("formTitle").textContent = "Edit guard";
+        $("formHelp").hidden = true;
+        $("emailWrap").hidden = true;
+        $("fullName").value = g.profile?.full_name || "";
+        $("guardCode").value = g.guard_code;
+        $("phone").value = g.phone || "";
+        $("saveBtn").textContent = "Save changes";
+        $("cancelBtn").hidden = false;
+        $("formCard").scrollIntoView({ behavior: "smooth" });
+      }
+
+      async function toggleGuard(id) {
+        const g = guards.find((x) => x.id === id);
+        if (!g) return;
+        const makeActive = g.status !== "active";
+        if (!makeActive && !confirm(`Deactivate ${g.profile?.full_name}? They will not be able to log in or be assigned.`)) return;
+        const { error } = await supabaseClient.rpc("set_guard_active", { p_guard_id: id, p_active: makeActive });
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        showMsg(msg, makeActive ? "Guard activated." : "Guard deactivated.", true);
+        await loadGuards();
+      }
+
+      $("saveBtn").addEventListener("click", async () => {
+        const fullName = $("fullName").value.trim();
+        const guardCode = $("guardCode").value.trim();
+        const phone = $("phone").value.trim();
+        if (!fullName || !guardCode) {
+          showMsg(msg, "Full name and guard code are required.", false);
+          return;
+        }
+
+        $("saveBtn").disabled = true;
+        let error;
+        if (editingId) {
+          ({ error } = await supabaseClient.rpc("update_guard", {
+            p_guard_id: editingId, p_full_name: fullName, p_guard_code: guardCode, p_phone: phone,
+          }));
+        } else {
+          const email = $("email").value.trim();
+          if (!email) {
+            showMsg(msg, "Enter the guard's login email.", false);
+            $("saveBtn").disabled = false;
+            return;
+          }
+          ({ error } = await supabaseClient.rpc("register_guard", {
+            p_email: email, p_full_name: fullName, p_guard_code: guardCode, p_phone: phone,
+          }));
+        }
+        $("saveBtn").disabled = false;
+
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        showMsg(msg, editingId ? "Guard updated." : "Guard registered.", true);
+        resetForm();
+        await loadGuards();
+      });
+
+      $("cancelBtn").addEventListener("click", () => { resetForm(); msg.textContent = ""; });
+      $("search").addEventListener("input", render);
+      $("rows").addEventListener("click", (e) => {
+        if (e.target.dataset.edit) startEdit(e.target.dataset.edit);
+        if (e.target.dataset.toggle) toggleGuard(e.target.dataset.toggle);
+      });
+
+      await loadGuards();
+    });
+  </script>
+</body>
 </html>
