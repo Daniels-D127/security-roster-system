@@ -1,32 +1,300 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Patrols</title>
-        <link rel="stylesheet" href="../css/style.css"/>
-    </head>
-    <body>
-        <main class="container">
-            <h1>Patrols</h1>
-            <div class="card no-print">
-                <h2>Scan checkpoint</h2>
-                <p class="muted">QR scanner comes in phase 7.</p>
-                <button>Start patrol round</button> <button class="secondary">Scan QR</button>
-            </div>
-            <div class="card">
-                <h2>Patrol rounds</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr><th>Guard</th><th>Started</th><th>Visited</th><th>Status</th></tr>
-                        <tr><td>Guard A</td><td>08:00</td><td>3 of 3</td><td><span class="badge ok">Completed</span></td></tr>
-                        <tr><td>Guard A</td><td>10:00</td><td>2 of 3</td><td><span class="badge bad">Incomplete</span></td></tr>
-                    </table>
-                </div>
-            </div>
-        </main>
-        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-        <script src="../js/supabaseClient.js"></script>
-        <script src="../js/layout.js"></script>
-    </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Patrols</title>
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Patrols</h1>
+    <p id="msg" class="status"></p>
+
+    <div class="card no-print" id="guardCard" hidden>
+      <h2>My patrol</h2>
+      <p id="noShift" class="muted" hidden>Check in on the Attendance page first.</p>
+      <div id="patrolBox" hidden>
+        <label for="assignment">Shift</label>
+        <select id="assignment"></select>
+        <br /><br />
+        <button id="startBtn">Start patrol round</button>
+
+        <div id="roundBox" hidden>
+          <h2 id="roundTitle"></h2>
+          <ul id="checklist" style="list-style:none;padding:0;margin:0 0 1rem"></ul>
+          <button id="camBtn">Start camera</button>
+          <div id="reader" style="max-width:320px;margin:.75rem 0"></div>
+          <label for="token">Or type the checkpoint code (for testing)</label>
+          <input id="token" placeholder="Paste checkpoint code" />
+          <br /><br />
+          <button class="secondary" id="tokenBtn">Submit code</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Patrol rounds</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Guard</th><th>Site</th><th>Started</th><th>Progress</th><th>Status</th><th id="actionsTh" class="no-print"></th></tr>
+          </thead>
+          <tbody id="rows"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card" id="qrCard" hidden>
+      <h2>Checkpoint QR codes</h2>
+      <div class="row no-print">
+        <div><label for="qrSite">Site</label><select id="qrSite"></select></div>
+      </div>
+      <button class="secondary no-print" id="printQr">Print QR codes</button>
+      <div id="qrGrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;margin-top:1rem"></div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="../js/supabaseClient.js"></script>
+  <script src="../js/util.js"></script>
+  <script src="../js/layout.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+  <script>
+    pageReady.then(async (profile) => {
+      if (!profile) return;
+      const $ = (id) => document.getElementById(id);
+      const msg = $("msg");
+      const isGuard = profile.role === "guard";
+      const isSupervisor = profile.role === "supervisor";
+      const one = (x) => (Array.isArray(x) ? x[0] : x);
+      let rounds = [];
+      let myAssignments = [];
+      let scanner = null;
+      let busy = false;
+
+      if (isGuard) $("guardCard").hidden = false;
+      else $("qrCard").hidden = false;
+      if (!isSupervisor) $("actionsTh").hidden = true;
+
+      const badgeFor = { completed: "ok", in_progress: "warn", incomplete: "bad" };
+      const labelFor = { completed: "Completed", in_progress: "In progress", incomplete: "Incomplete" };
+
+      // ---------- Rounds list ----------
+      async function loadRounds() {
+        const { data, error } = await supabaseClient.rpc("patrol_rounds_overview", { p_limit: 30 });
+        if (error) {
+          $("rows").innerHTML = `<tr><td colspan="6" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+        rounds = data || [];
+        renderRounds();
+        if (isGuard) renderGuardPanel();
+      }
+
+      function renderRounds() {
+        if (!rounds.length) {
+          $("rows").innerHTML = '<tr><td colspan="6" class="muted">No patrol rounds yet.</td></tr>';
+          return;
+        }
+        $("rows").innerHTML = rounds.map((r) => {
+          const total = r.checkpoints.length;
+          const done = r.checkpoints.filter((c) => c.visited).length;
+          const missing = r.checkpoints.filter((c) => !c.visited);
+          const missingText = r.status !== "completed" && missing.length
+            ? `<div class="muted" style="font-size:.8rem">Missing: ${esc(missing.map((c) => c.name).join(", "))}</div>`
+            : "";
+          let actions = "";
+          if (isSupervisor) {
+            const canConfirm = r.status !== "completed" && missing.length;
+            actions = `<td class="no-print">${canConfirm
+              ? `<select data-pick="${esc(r.id)}" style="width:auto">${missing.map((c) =>
+                  `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("")}</select>
+                 <button class="secondary" data-confirm="${esc(r.id)}">Confirm manually</button>`
+              : ""}</td>`;
+          }
+          return `<tr>
+            <td>${esc(r.guard_name)}</td>
+            <td>${esc(r.site_name)}</td>
+            <td>${esc(fmtDateTime(r.started_at))}</td>
+            <td>${done} of ${total}${missingText}</td>
+            <td><span class="badge ${badgeFor[r.status] || "warn"}">${labelFor[r.status] || esc(r.status)}</span></td>
+            ${actions}</tr>`;
+        }).join("");
+      }
+
+      $("rows").addEventListener("click", async (e) => {
+        const roundId = e.target.dataset.confirm;
+        if (!roundId) return;
+        const cp = document.querySelector(`select[data-pick="${roundId}"]`).value;
+        const reason = prompt("Reason for confirming this checkpoint manually:");
+        if (!reason || !reason.trim()) {
+          showMsg(msg, "A reason is required for manual confirmation.", false);
+          return;
+        }
+        const { error } = await supabaseClient.rpc("confirm_visit",
+          { p_round_id: roundId, p_checkpoint_id: cp, p_reason: reason.trim() });
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        showMsg(msg, "Checkpoint confirmed manually and logged.", true);
+        await loadRounds();
+      });
+
+      // ---------- Guard: patrol panel ----------
+      async function loadMyAssignments() {
+        const { data, error } = await supabaseClient
+          .from("shift_assignments")
+          .select("id, shift:shifts(start_time, site:client_sites(site_name)), attendance(check_in_at, check_out_at)")
+          .eq("assignment_status", "assigned");
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        myAssignments = data.filter((a) => {
+          const att = one(a.attendance);
+          return att && att.check_in_at && !att.check_out_at;
+        });
+        $("assignment").innerHTML = myAssignments.map((a) =>
+          `<option value="${esc(a.id)}">${esc(a.shift?.site?.site_name)}, ${esc(fmtDateTime(a.shift?.start_time))}</option>`
+        ).join("");
+      }
+
+      function currentRound() {
+        const id = $("assignment").value;
+        return rounds.find((r) => r.status === "in_progress" && r.assignment_id === id) || null;
+      }
+
+      function renderGuardPanel() {
+        const has = myAssignments.length > 0;
+        $("noShift").hidden = has;
+        $("patrolBox").hidden = !has;
+        if (!has) { stopScan(); return; }
+
+        const round = currentRound();
+        $("startBtn").hidden = !!round;
+        $("roundBox").hidden = !round;
+        if (!round) { stopScan(); return; }
+
+        const done = round.checkpoints.filter((c) => c.visited).length;
+        $("roundTitle").textContent = `Round in progress: ${done} of ${round.checkpoints.length}`;
+        $("checklist").innerHTML = round.checkpoints.map((c) =>
+          `<li style="padding:.3rem 0">${c.visited ? "✓" : "○"} ${esc(c.name)}${c.method === "manual" ? " (confirmed by supervisor)" : ""}</li>`
+        ).join("");
+      }
+
+      $("assignment").addEventListener("change", renderGuardPanel);
+
+      $("startBtn").addEventListener("click", async () => {
+        const { error } = await supabaseClient.rpc("start_patrol", { p_assignment_id: $("assignment").value });
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        showMsg(msg, "Patrol round started.", true);
+        await loadRounds();
+      });
+
+      async function submitToken(token) {
+        const round = currentRound();
+        if (!round) { showMsg(msg, "Start a patrol round first.", false); return; }
+        const code = (token || "").trim();
+        if (!code) { showMsg(msg, "Scan or enter a checkpoint code.", false); return; }
+
+        const { data, error } = await supabaseClient.rpc("record_visit", { p_round_id: round.id, p_token: code });
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+
+        const progress = `${data.visited} of ${data.required}`;
+        if (data.completed) {
+          showMsg(msg, `Recorded ${data.checkpoint}. Patrol round complete.`, true);
+          await stopScan();
+        } else if (data.result === "duplicate") {
+          showMsg(msg, `${data.checkpoint} was already recorded (${progress}). Not counted again.`, true);
+        } else {
+          showMsg(msg, `Recorded ${data.checkpoint} (${progress}).`, true);
+        }
+        $("token").value = "";
+        await loadRounds();
+      }
+
+      $("tokenBtn").addEventListener("click", () => submitToken($("token").value));
+
+      // ---------- Camera scanner ----------
+      async function startScan() {
+        if (scanner) return;
+        if (!window.Html5Qrcode) { showMsg(msg, "The scanner library did not load.", false); return; }
+        scanner = new Html5Qrcode("reader");
+        const onScan = async (text) => {
+          if (busy) return;
+          busy = true;
+          await submitToken(text);
+          setTimeout(() => { busy = false; }, 2000);
+        };
+        const begin = (camera) => scanner.start(camera, { fps: 10, qrbox: 220 }, onScan, () => {});
+        try {
+          try {
+            await begin({ facingMode: "environment" });
+          } catch (e1) {
+            const cams = await Html5Qrcode.getCameras();
+            await begin(cams[0].id);
+          }
+          $("camBtn").textContent = "Stop camera";
+        } catch (err) {
+          scanner = null;
+          showMsg(msg, "Camera not available: " + err, false);
+        }
+      }
+
+      async function stopScan() {
+        if (!scanner) return;
+        const s = scanner;
+        scanner = null;
+        try { await s.stop(); s.clear(); } catch (_) {}
+        $("camBtn").textContent = "Start camera";
+      }
+
+      $("camBtn").addEventListener("click", () => (scanner ? stopScan() : startScan()));
+
+      // ---------- Staff: QR codes ----------
+      async function loadQrSites() {
+        const { data, error } = await supabaseClient
+          .from("client_sites").select("id, site_name").order("site_name");
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        $("qrSite").innerHTML = data.map((s) =>
+          `<option value="${esc(s.id)}">${esc(s.site_name)}</option>`).join("");
+        await renderQr();
+      }
+
+      async function renderQr() {
+        const siteId = $("qrSite").value;
+        if (!siteId) { $("qrGrid").innerHTML = ""; return; }
+        const { data, error } = await supabaseClient
+          .from("checkpoints")
+          .select("checkpoint_name, qr_token, active")
+          .eq("site_id", siteId)
+          .order("checkpoint_name");
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        if (!data.length) {
+          $("qrGrid").innerHTML = '<p class="muted">No checkpoints for this site.</p>';
+          return;
+        }
+        $("qrGrid").innerHTML = data.map((c) => {
+          const qr = qrcode(0, "M");
+          qr.addData(c.qr_token);
+          qr.make();
+          const url = qr.createDataURL(6, 2);
+          return `<div style="text-align:center">
+            <img src="${url}" alt="QR code for ${esc(c.checkpoint_name)}" style="width:100%;max-width:200px;image-rendering:pixelated" />
+            <div><strong>${esc(c.checkpoint_name)}</strong>${c.active ? "" : " (inactive)"}</div>
+            <div class="muted" style="font-size:.7rem;word-break:break-all">${esc(c.qr_token)}</div>
+          </div>`;
+        }).join("");
+      }
+
+      $("qrSite").addEventListener("change", renderQr);
+      $("printQr").addEventListener("click", () => {
+        document.body.classList.add("print-qr");
+        window.print();
+        document.body.classList.remove("print-qr");
+      });
+
+      if (isGuard) await loadMyAssignments();
+      else await loadQrSites();
+      await loadRounds();
+    });
+  </script>
+</body>
 </html>

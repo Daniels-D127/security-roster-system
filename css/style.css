@@ -55,3 +55,4 @@ button.secondary { background: #fff; color: var(--primary); border: 1px solid va
 
 @media print { .topbar, .nav, .no-print { display: none;} body { background: #fff;}}
 .topbar .who { margin-right: .75rem; font-size: .85rem;}
+@media print { body.print-qr main > :not(#qrCard) { display: none;}}

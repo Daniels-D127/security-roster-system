@@ -1,29 +1,140 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Attendance</title>
-        <link rel="stylesheet" href="../css/style.css"/>
-    </head>
-    <body>
-        <main class="container">
-            <h1>Attendance</h1>
-            <div class="card">
-                <div class="no-print" style="margin-left: .75rem;">
-                    <button>Check in</button> <button class="secondary">Check out</button>
-                </div>
-                <div class="table-wrap">
-                    <table>
-                        <tr><th>Guard</th><th>Site</th><th>Check in</th><th>Check out</th><th>Status</th></tr>
-                        <tr><td>Guard A</td><td>Demo Mall</td><td>06:12</td><td>-</td><td><span class="badge warn">Late</span></td></tr>
-                        <tr><td>Guard B</td><td>Demo Mall</td><td>13:58</td><td>22:01</td><td><span class="badge ok">Present</span></td></tr>
-                    </table>
-                </div>
-            </div>
-        </main>
-        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-        <script src="../js/supabaseClient.js"></script>
-        <script src="../js/layout.js"></script>
-    </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Attendance</title>
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1 id="title">Attendance</h1>
+    <p id="msg" class="status"></p>
+    <div class="card">
+      <h2 id="tableTitle">Attendance records</h2>
+      <div class="table-wrap">
+        <table>
+          <thead id="head"></thead>
+          <tbody id="rows"><tr><td class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="../js/supabaseClient.js"></script>
+  <script src="../js/util.js"></script>
+  <script src="../js/layout.js"></script>
+  <script>
+    pageReady.then(async (profile) => {
+      if (!profile) return;
+      const $ = (id) => document.getElementById(id);
+      const msg = $("msg");
+      const isGuard = profile.role === "guard";
+      const one = (x) => (Array.isArray(x) ? x[0] : x);
+
+      // ---------- Guard: my shifts with check in / out ----------
+      async function loadGuardView() {
+        $("title").textContent = "My attendance";
+        $("tableTitle").textContent = "My shifts";
+        $("head").innerHTML =
+          "<tr><th>Site</th><th>Start</th><th>End</th><th>Check in</th><th>Check out</th><th>Status</th><th></th></tr>";
+
+        const { data, error } = await supabaseClient
+          .from("shift_assignments")
+          .select("id, shift:shifts(start_time, end_time, status, site:client_sites(site_name)), attendance(check_in_at, check_out_at, status)")
+          .eq("assignment_status", "assigned");
+        if (error) {
+          $("rows").innerHTML = `<tr><td colspan="7" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+
+        const cutoff = Date.now() - 12 * 3600 * 1000;
+        const list = data
+          .filter((a) => a.shift && a.shift.status !== "cancelled" &&
+                         new Date(a.shift.end_time).getTime() > cutoff)
+          .sort((a, b) => new Date(a.shift.start_time) - new Date(b.shift.start_time));
+
+        if (!list.length) {
+          $("rows").innerHTML = '<tr><td colspan="7" class="muted">No shifts assigned to you.</td></tr>';
+          return;
+        }
+
+        $("rows").innerHTML = list.map((a) => {
+          const att = one(a.attendance);
+          let label, cls, button = "";
+          if (!att) {
+            label = "Not checked in"; cls = "warn";
+            button = `<button data-in="${esc(a.id)}">Check in</button>`;
+          } else if (att.check_out_at) {
+            label = "Checked out"; cls = "ok";
+          } else {
+            label = att.status === "late" ? "Late" : "Present";
+            cls = att.status === "late" ? "warn" : "ok";
+            button = `<button class="secondary" data-out="${esc(a.id)}">Check out</button>`;
+          }
+          return `<tr>
+            <td>${esc(a.shift.site?.site_name)}</td>
+            <td>${esc(fmtDateTime(a.shift.start_time))}</td>
+            <td>${esc(fmtDateTime(a.shift.end_time))}</td>
+            <td>${att ? esc(fmtDateTime(att.check_in_at)) : "—"}</td>
+            <td>${att && att.check_out_at ? esc(fmtDateTime(att.check_out_at)) : "—"}</td>
+            <td><span class="badge ${cls}">${label}</span></td>
+            <td>${button}</td></tr>`;
+        }).join("");
+      }
+
+      $("rows").addEventListener("click", async (e) => {
+        const d = e.target.dataset;
+        const fn = d.in ? "check_in" : d.out ? "check_out" : null;
+        if (!fn) return;
+        e.target.disabled = true;
+        const { error } = await supabaseClient.rpc(fn, { p_assignment_id: d.in || d.out });
+        if (error) {
+          showMsg(msg, friendlyError(error), false);
+          e.target.disabled = false;
+          return;
+        }
+        showMsg(msg, fn === "check_in" ? "Checked in." : "Checked out.", true);
+        await loadGuardView();
+      });
+
+      // ---------- Staff: attendance records ----------
+      async function loadStaffView() {
+        $("head").innerHTML =
+          "<tr><th>Guard</th><th>Site</th><th>Shift start</th><th>Check in</th><th>Check out</th><th>Status</th></tr>";
+
+        const { data, error } = await supabaseClient
+          .from("attendance")
+          .select("check_in_at, check_out_at, status, assignment:shift_assignments(shift:shifts(start_time, site:client_sites(site_name)), guard:guards(guard_code, profile:profiles(full_name)))")
+          .order("check_in_at", { ascending: false })
+          .limit(50);
+        if (error) {
+          $("rows").innerHTML = `<tr><td colspan="6" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+        if (!data.length) {
+          $("rows").innerHTML = '<tr><td colspan="6" class="muted">No attendance records yet.</td></tr>';
+          return;
+        }
+
+        $("rows").innerHTML = data.map((a) => {
+          const sh = a.assignment?.shift;
+          const cls = a.status === "late" ? "warn" : a.status === "absent" ? "bad" : "ok";
+          const label = a.status === "late" ? "Late" : a.status === "absent" ? "Absent" : "Present";
+          return `<tr>
+            <td>${esc(a.assignment?.guard?.profile?.full_name)}</td>
+            <td>${esc(sh?.site?.site_name)}</td>
+            <td>${sh ? esc(fmtDateTime(sh.start_time)) : "—"}</td>
+            <td>${esc(fmtDateTime(a.check_in_at))}</td>
+            <td>${a.check_out_at ? esc(fmtDateTime(a.check_out_at)) : "—"}</td>
+            <td><span class="badge ${cls}">${label}</span></td></tr>`;
+        }).join("");
+      }
+
+      if (isGuard) await loadGuardView();
+      else await loadStaffView();
+    });
+  </script>
+</body>
 </html>
