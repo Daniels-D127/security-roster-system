@@ -1,38 +1,246 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Incidents</title>
-        <link rel="stylesheet" href="../css/style.css"/>
-    </head>
-    <body>
-        <main class="container">
-            <h1>Incidents</h1>
-            <div class="card no-print">
-                <h2>Report incident</h2>
-                <div class="row">
-                    <div><label>Site</label><select><option>Demo Mall</option><option>Demo Warehouse</option></select></div>
-                    <div><label>Type</label><select><option>Theft</option><option>Trespass</option><option>Equipment</option></select></div>
-                </div>
-                <label>Description</label>
-                <textarea rows="3"></textarea>
-                <br/><br/>
-                <button>Submit report</button>
-            </div>
-            <div class="card">
-                <h2>Incident log</h2>
-                <div class="table-wrap">
-                    <table>
-                    <tr><th>Time</th><th>Site</th><th>Type</th><th>Status</th></tr>
-                    <tr><td>Mon 09:40</td><td>Demo Mall</td><td>Trespass</td><td><span class="badge warn">Under review</span></td></tr>
-                    <tr><td>Sun 23:10</td><td>Demo Warehouse</td><td>Equipment</td><td><span class="badge ok">Resolved</span></td></tr>
-                    </table>
-                </div>
-            </div>
-        </main>
-       <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-        <script src="../js/supabaseClient.js"></script>
-        <script src="../js/layout.js"></script>
-    </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Incidents</title>
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Incidents</h1>
+    <p id="msg" class="status"></p>
+
+    <div class="card" id="excCard" hidden>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.75rem">
+        <h2 style="margin:0">Exceptions</h2>
+        <select id="excDays" style="width:auto">
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Type</th><th>Site</th><th>Guard</th><th>When</th><th>Detail</th></tr></thead>
+          <tbody id="excRows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card no-print">
+      <h2>Report incident</h2>
+      <p id="noSite" class="muted" hidden>You can report incidents for a site where you have a current shift.</p>
+      <div id="reportBox">
+        <div class="row">
+          <div><label for="site">Site</label><select id="site"></select></div>
+          <div><label for="type">Type</label><select id="type"></select></div>
+        </div>
+        <label for="desc">Description</label>
+        <textarea id="desc" rows="3" maxlength="2000"></textarea>
+        <br /><br />
+        <button id="reportBtn">Submit report</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:.5rem;margin-bottom:.75rem">
+        <h2 style="margin:0">Incident log</h2>
+        <select id="filter" style="width:auto">
+          <option value="unresolved">Unresolved</option>
+          <option value="all">All</option>
+          <option value="resolved">Resolved</option>
+        </select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Reported</th><th>Site</th><th>Type</th><th id="reporterTh">Reported by</th><th>Description</th><th>Status</th><th id="actionsTh" class="no-print"></th></tr>
+          </thead>
+          <tbody id="rows"><tr><td colspan="7" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="../js/supabaseClient.js"></script>
+  <script src="../js/util.js"></script>
+  <script src="../js/layout.js"></script>
+  <script>
+    pageReady.then(async (profile) => {
+      if (!profile) return;
+      const $ = (id) => document.getElementById(id);
+      const msg = $("msg");
+      const isStaff = profile.role !== "guard";
+      const wrap = 'style="white-space:normal;min-width:220px"';
+
+      const TYPES = {
+        theft: "Theft", trespass: "Trespass", vandalism: "Vandalism",
+        fire_safety: "Fire or safety", medical: "Medical",
+        equipment: "Equipment", other: "Other",
+      };
+      const STATUS = {
+        open: ["Open", "bad"],
+        under_review: ["Under review", "warn"],
+        resolved: ["Resolved", "ok"],
+      };
+      const EXC = {
+        unfilled_shift: ["Unfilled shift", "bad"],
+        missed_checkin: ["Missed check-in", "bad"],
+        late_checkin: ["Late check-in", "warn"],
+        missed_patrol: ["Missed patrol", "bad"],
+        no_patrol: ["No patrol", "bad"],
+      };
+      let incidents = [];
+
+      $("type").innerHTML = Object.entries(TYPES)
+        .map(([v, l]) => `<option value="${v}">${l}</option>`).join("");
+
+      if (isStaff) $("excCard").hidden = false;
+      else { $("reporterTh").hidden = true; $("actionsTh").hidden = true; }
+
+      // ---------- Exceptions (staff) ----------
+      async function loadExceptions() {
+        const { data, error } = await supabaseClient.rpc("exceptions_overview",
+          { p_days: Number($("excDays").value) });
+        if (error) {
+          $("excRows").innerHTML = `<tr><td colspan="5" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+        if (!data.length) {
+          $("excRows").innerHTML = '<tr><td colspan="5" class="muted">No exceptions in this period.</td></tr>';
+          return;
+        }
+        $("excRows").innerHTML = data.map((x) => {
+          const [label, cls] = EXC[x.type] || [x.type, "warn"];
+          return `<tr>
+            <td><span class="badge ${cls}">${esc(label)}</span></td>
+            <td>${esc(x.site_name)}</td>
+            <td>${esc(x.guard_name || "—")}</td>
+            <td>${esc(fmtDateTime(x.occurred_at))}</td>
+            <td ${wrap}>${esc(x.detail)}</td></tr>`;
+        }).join("");
+      }
+      $("excDays").addEventListener("change", loadExceptions);
+
+      // ---------- Report form ----------
+      async function loadSites() {
+        let sites = [];
+        if (isStaff) {
+          const { data, error } = await supabaseClient
+            .from("client_sites").select("id, site_name").eq("status", "active").order("site_name");
+          if (error) { showMsg(msg, friendlyError(error), false); return; }
+          sites = data;
+        } else {
+          const { data, error } = await supabaseClient
+            .from("shift_assignments")
+            .select("shift:shifts(site_id, start_time, end_time, site:client_sites(site_name))")
+            .eq("assignment_status", "assigned");
+          if (error) { showMsg(msg, friendlyError(error), false); return; }
+          const from = Date.now() - 12 * 3600 * 1000;
+          const to = Date.now() + 12 * 3600 * 1000;
+          const found = new Map();
+          data.forEach((a) => {
+            const s = a.shift;
+            if (s && new Date(s.end_time).getTime() >= from && new Date(s.start_time).getTime() <= to) {
+              found.set(s.site_id, s.site?.site_name);
+            }
+          });
+          sites = [...found].map(([id, site_name]) => ({ id, site_name }));
+          $("noSite").hidden = sites.length > 0;
+          $("reportBox").hidden = sites.length === 0;
+        }
+        $("site").innerHTML = sites
+          .map((s) => `<option value="${esc(s.id)}">${esc(s.site_name)}</option>`).join("");
+      }
+
+      $("reportBtn").addEventListener("click", async () => {
+        const description = $("desc").value.trim();
+        if (!$("site").value) { showMsg(msg, "Choose a site.", false); return; }
+        if (!description) { showMsg(msg, "Describe what happened.", false); return; }
+        $("reportBtn").disabled = true;
+        const { error } = await supabaseClient.rpc("report_incident",
+          { p_site_id: $("site").value, p_type: $("type").value, p_description: description });
+        $("reportBtn").disabled = false;
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        $("desc").value = "";
+        showMsg(msg, "Incident reported.", true);
+        await loadIncidents();
+      });
+
+      // ---------- Incident log ----------
+      async function loadIncidents() {
+        const { data, error } = await supabaseClient
+          .from("incidents")
+          .select("id, incident_type, description, reported_at, status, resolution_notes, resolved_at, site:client_sites(site_name), reporter:profiles!reported_by(full_name), resolver:profiles!resolved_by(full_name)")
+          .order("reported_at", { ascending: false })
+          .limit(100);
+        if (error) {
+          $("rows").innerHTML = `<tr><td colspan="7" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+        incidents = data;
+        renderIncidents();
+      }
+
+      function renderIncidents() {
+        const f = $("filter").value;
+        const list = incidents.filter((i) =>
+          f === "all" ? true : f === "resolved" ? i.status === "resolved" : i.status !== "resolved");
+        if (!list.length) {
+          $("rows").innerHTML = '<tr><td colspan="7" class="muted">No incidents to show.</td></tr>';
+          return;
+        }
+        $("rows").innerHTML = list.map((i) => {
+          const [label, cls] = STATUS[i.status] || [i.status, "warn"];
+          const notes = i.resolution_notes
+            ? `<div class="muted" style="font-size:.8rem;white-space:normal">Resolution: ${esc(i.resolution_notes)}${
+                i.resolver?.full_name ? ` (${esc(i.resolver.full_name)}, ${esc(fmtDateTime(i.resolved_at))})` : ""}</div>`
+            : "";
+          let actions = "";
+          if (isStaff) {
+            actions = `<td class="no-print">${
+              i.status === "open" ? `<button class="secondary" data-review="${esc(i.id)}">Start review</button> ` : ""}${
+              i.status !== "resolved" ? `<button class="secondary" data-resolve="${esc(i.id)}">Resolve</button>` : ""}${
+              i.status === "resolved" ? `<button class="secondary" data-reopen="${esc(i.id)}">Reopen</button>` : ""}</td>`;
+          }
+          return `<tr>
+            <td>${esc(fmtDateTime(i.reported_at))}</td>
+            <td>${esc(i.site?.site_name)}</td>
+            <td>${esc(TYPES[i.incident_type] || i.incident_type)}</td>
+            ${isStaff ? `<td>${esc(i.reporter?.full_name || "—")}</td>` : ""}
+            <td ${wrap}>${esc(i.description)}</td>
+            <td><span class="badge ${cls}">${esc(label)}</span>${notes}</td>
+            ${actions}</tr>`;
+        }).join("");
+      }
+
+      $("filter").addEventListener("change", renderIncidents);
+
+      $("rows").addEventListener("click", async (e) => {
+        const d = e.target.dataset;
+        const id = d.review || d.resolve || d.reopen;
+        if (!id) return;
+        let status = d.review ? "under_review" : d.resolve ? "resolved" : "open";
+        let notes = null;
+        if (status === "resolved") {
+          notes = prompt("Resolution details (what was done):");
+          if (!notes || !notes.trim()) {
+            showMsg(msg, "Resolution details are required.", false);
+            return;
+          }
+        }
+        const { error } = await supabaseClient.rpc("update_incident",
+          { p_incident_id: id, p_status: status, p_notes: notes });
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        showMsg(msg, "Incident updated.", true);
+        await loadIncidents();
+      });
+
+      await loadSites();
+      await loadIncidents();
+      if (isStaff) await loadExceptions();
+    });
+  </script>
+</body>
 </html>
