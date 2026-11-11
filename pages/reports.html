@@ -1,35 +1,193 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Reports</title>
-        <link rel="stylesheet" href="../css/style.css"/>
-    </head>
-    <body>
-        <main class="container">
-            <h1>Reports</h1>
-            <div class="card no-print">
-                <div class="row">
-                    <div><label>From</label><input type="date"/></div>
-                    <div><label>To</label><input type="date"/></div>
-                    <div><label>Site</label><select><option>All sites</option><option>Demo Mall</option></select></div>
-                </div>
-                <button onclick="window.print()">Print report</button>
-            </div>
-            <div class="card">
-                <h2>Patrol summary</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr><th>Site</th><th>Rounds</th><th>Completed</th><th>Incomplete</th></tr>
-                        <tr><td>Demo Mall</td><td>12</td><td>11</td><td>1</td></tr>
-                        <tr><td>Demo Warehouse</td><td>8</td><td>8</td><td>0</td></tr>
-                    </table>
-                </div>
-            </div>
-        </main>
-       <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-        <script src="../js/supabaseClient.js"></script>
-        <script src="../js/layout.js"></script>
-    </body>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Reports</title>
+  <link rel="stylesheet" href="../css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Reports</h1>
+    <p id="msg" class="status"></p>
+
+    <div class="card no-print">
+      <div class="row">
+        <div><label for="from">From</label><input id="from" type="date" /></div>
+        <div><label for="to">To</label><input id="to" type="date" /></div>
+        <div><label for="site">Site</label><select id="site"></select></div>
+      </div>
+      <button id="runBtn">Run report</button>
+      <button id="printBtn" class="secondary">Print report</button>
+    </div>
+
+    <div class="print-only" id="printHeader"></div>
+
+    <div id="out" hidden>
+      <div class="grid" style="margin-bottom:1rem" id="stats"></div>
+
+      <div class="card">
+        <h2>Coverage and patrols by site</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Site</th><th>Shifts</th><th>Unfilled</th><th>Rounds completed</th><th>Rounds incomplete</th><th>Completion</th></tr></thead>
+            <tbody id="siteRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Guard attendance and patrols</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Guard</th><th>Shifts</th><th>Checked in</th><th>Late</th><th>Missed check-in</th><th>Rounds completed</th><th>Rounds incomplete</th></tr></thead>
+            <tbody id="guardRows"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Incidents</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Reported</th><th>Site</th><th>Type</th><th>Description</th><th>Status</th></tr></thead>
+            <tbody id="incRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="../js/supabaseClient.js"></script>
+  <script src="../js/util.js"></script>
+  <script src="../js/layout.js"></script>
+  <script>
+    pageReady.then(async (profile) => {
+      if (!profile) return;
+      const $ = (id) => document.getElementById(id);
+      const msg = $("msg");
+      const wrap = 'style="white-space:normal;min-width:220px"';
+      const TYPES = {
+        theft: "Theft", trespass: "Trespass", vandalism: "Vandalism",
+        fire_safety: "Fire or safety", medical: "Medical",
+        equipment: "Equipment", other: "Other",
+      };
+      const STATUS = {
+        open: ["Open", "bad"], under_review: ["Under review", "warn"], resolved: ["Resolved", "ok"],
+      };
+      const stat = (num, label) =>
+        `<div class="stat"><div class="num">${esc(num)}</div><div class="label">${esc(label)}</div></div>`;
+      const pct = (done, missed) => (done + missed ? Math.round((100 * done) / (done + missed)) + "%" : "–");
+      const ymd = (d) => {
+        const p = (n) => String(n).padStart(2, "0");
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+      };
+      let ran = false;
+
+      // Defaults: last 7 days
+      const today = new Date();
+      const weekAgo = new Date();
+      weekAgo.setDate(weekAgo.getDate() - 6);
+      $("to").value = ymd(today);
+      $("from").value = ymd(weekAgo);
+
+      const sitesRes = await supabaseClient
+        .from("client_sites").select("id, site_name").order("site_name");
+      if (sitesRes.error) showMsg(msg, friendlyError(sitesRes.error), false);
+      else {
+        $("site").innerHTML = '<option value="">All sites</option>' + sitesRes.data
+          .map((s) => `<option value="${esc(s.id)}">${esc(s.site_name)}</option>`).join("");
+      }
+
+      async function runReport() {
+        if (!$("from").value || !$("to").value) {
+          showMsg(msg, "Choose a start and an end date.", false);
+          return;
+        }
+        const from = new Date($("from").value + "T00:00:00");
+        const to = new Date($("to").value + "T23:59:59.999");
+        if (to < from) { showMsg(msg, "The end date must not be before the start date.", false); return; }
+        const siteId = $("site").value || null;
+
+        $("runBtn").disabled = true;
+        msg.textContent = "";
+
+        let incQuery = supabaseClient
+          .from("incidents")
+          .select("incident_type, description, reported_at, status, site:client_sites(site_name)")
+          .gte("reported_at", from.toISOString())
+          .lte("reported_at", to.toISOString())
+          .order("reported_at", { ascending: false });
+        if (siteId) incQuery = incQuery.eq("site_id", siteId);
+
+        const [repRes, incRes] = await Promise.all([
+          supabaseClient.rpc("report_summary",
+            { p_from: from.toISOString(), p_to: to.toISOString(), p_site_id: siteId }),
+          incQuery,
+        ]);
+        $("runBtn").disabled = false;
+
+        const err = repRes.error || incRes.error;
+        if (err) { showMsg(msg, friendlyError(err), false); return; }
+
+        const t = repRes.data.totals;
+        const incidents = incRes.data;
+        const unresolved = incidents.filter((i) => i.status !== "resolved").length;
+
+        $("stats").innerHTML =
+          stat(t.shifts, "Shifts") +
+          stat(t.unfilled, "Unfilled shifts") +
+          stat(`${t.attended} of ${t.assignments}`, "Guards checked in") +
+          stat(t.late, "Late check-ins") +
+          stat(t.missed_checkin, "Missed check-ins") +
+          stat(pct(t.rounds_completed, t.rounds_incomplete), "Patrol completion") +
+          stat(incidents.length, "Incidents") +
+          stat(unresolved, "Unresolved incidents");
+
+        const sites = repRes.data.sites;
+        $("siteRows").innerHTML = sites.length ? sites.map((s) => `<tr>
+          <td>${esc(s.site_name)}</td><td>${esc(s.shifts)}</td><td>${esc(s.unfilled)}</td>
+          <td>${esc(s.rounds_completed)}</td><td>${esc(s.rounds_incomplete)}</td>
+          <td>${esc(pct(s.rounds_completed, s.rounds_incomplete))}</td></tr>`).join("")
+          : '<tr><td colspan="6" class="muted">No shifts in this period.</td></tr>';
+
+        const guards = repRes.data.guards;
+        $("guardRows").innerHTML = guards.length ? guards.map((g) => `<tr>
+          <td>${esc(g.full_name)} (${esc(g.guard_code)})</td><td>${esc(g.assigned)}</td>
+          <td>${esc(g.attended)}</td><td>${esc(g.late)}</td><td>${esc(g.missed)}</td>
+          <td>${esc(g.rounds_completed)}</td><td>${esc(g.rounds_incomplete)}</td></tr>`).join("")
+          : '<tr><td colspan="7" class="muted">No guard assignments in this period.</td></tr>';
+
+        $("incRows").innerHTML = incidents.length ? incidents.map((i) => {
+          const [label, cls] = STATUS[i.status] || [i.status, "warn"];
+          return `<tr>
+            <td>${esc(fmtDateTime(i.reported_at))}</td>
+            <td>${esc(i.site?.site_name)}</td>
+            <td>${esc(TYPES[i.incident_type] || i.incident_type)}</td>
+            <td ${wrap}>${esc(i.description)}</td>
+            <td><span class="badge ${cls}">${esc(label)}</span></td></tr>`;
+        }).join("") : '<tr><td colspan="5" class="muted">No incidents in this period.</td></tr>';
+
+        const siteName = siteId ? $("site").selectedOptions[0].textContent : "All sites";
+        $("printHeader").innerHTML = `
+          <h1 style="margin-bottom:.25rem">Security Roster report</h1>
+          <div>Period: ${esc($("from").value)} to ${esc($("to").value)}</div>
+          <div>Site: ${esc(siteName)}</div>
+          <div>Prepared by ${esc(profile.full_name)} on ${esc(fmtDateTime(new Date().toISOString()))}</div>`;
+
+        $("out").hidden = false;
+        ran = true;
+      }
+
+      $("runBtn").addEventListener("click", runReport);
+      $("printBtn").addEventListener("click", () => {
+        if (!ran) { showMsg(msg, "Run the report first.", false); return; }
+        window.print();
+      });
+
+      await runReport();
+    });
+  </script>
+</body>
 </html>

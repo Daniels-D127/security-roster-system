@@ -1,49 +1,188 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8"/>
-        <meta name="viewport" content="width=device-width, initial-scale=1"/>
-        <title>Dashboard</title>
-        <link rel="stylesheet" href="css/style.css"/>
-    </head>
-    <body>
-        <main class="container">
-            <h1>Dashboard</h1>
-            <p class="muted">Sample numbers only. Real data comes in phase 9.</p>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Dashboard</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <main class="container">
+    <h1>Dashboard</h1>
+    <p id="msg" class="status"></p>
 
-            <div class="grid" style="margin-bottom:1rem">
-                <div class="stat"><div class="num">8</div><div class="label">Guard on duty</div></div>
-                <div class="stat"><div class="num">3</div><div class="label">Upcoming shifts</div></div>
-                <div class="stat"><div class="num">1</div><div class="label">Unfilled shifts</div></div>
-                <div class="stat"><div class="num">92%</div><div class="label">Patrol completion</div></div>
-                <div class="stat"><div class="num">2</div><div class="label">Open incidents</div></div>
-            </div>
+    <div class="grid" style="margin-bottom:1rem" id="stats"></div>
 
-            <div class="card">
-                <h2>Today's shifts</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr><th>Site</th><th>Time</th><th>Guard</th><th>Status</th></tr>
-                        <tr><td>Demo Mall</td><td>06:00 - 14:00</td><td>Guard A</td><td><span class="badge ok">Checked in</span></td></tr>
-                        <tr><td>Demo Mall</td><td>14:00 - 22:00</td><td>Guard B</td><td><span class="badge warn">Upcoming</span></td></tr>
-                        <tr><td>Demo Warehouse</td><td>22:00 - 06:00</td><td>-</td><td><span class="badge bad">Unfilled</span></td></tr>
-                    </table>
-                </div>
-            </div>
+    <div class="card">
+      <h2 id="shiftsTitle">Today's shifts</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Site</th><th>Time</th><th>Guard</th><th>Status</th></tr></thead>
+          <tbody id="shiftRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
 
-            <div class="card">
-                <h2>Exceptions</h2>
-                <div class="table-wrap">
-                    <table>
-                        <tr><th>Type</th><th>Site</th><th>Detail</th></tr>
-                        <tr><td><span class="badge bad">Missed patrol</span></td><td>Demo Mall</td><td>Back Entrance not visited</td></tr>
-                        <tr><td><span class="badge warn">Late check-in</span></td><td>Demo Mall</td><td>Guard A, 12 min late</td></tr>
-                    </table>
-                </div>
-            </div>
-        </main>
-        <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
-        <script src="js/supabaseClient.js"></script>
-        <script src="js/layout.js"></script>
-    </body>
+    <div class="card" id="excCard" hidden>
+      <h2>Recent exceptions</h2>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Type</th><th>Site</th><th>Guard</th><th>When</th></tr></thead>
+          <tbody id="excRows"><tr><td colspan="4" class="muted">Loading…</td></tr></tbody>
+        </table>
+      </div>
+      <p><a href="pages/incidents.html">View all exceptions and incidents</a></p>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+  <script src="js/supabaseClient.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/layout.js"></script>
+  <script>
+    pageReady.then(async (profile) => {
+      if (!profile) return;
+      const $ = (id) => document.getElementById(id);
+      const msg = $("msg");
+      const isGuard = profile.role === "guard";
+      const one = (x) => (Array.isArray(x) ? x[0] : x);
+      const fmtTime = (iso) =>
+        new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      const stat = (num, label) =>
+        `<div class="stat"><div class="num">${esc(num)}</div><div class="label">${esc(label)}</div></div>`;
+      const badge = ([label, cls]) => `<span class="badge ${cls}">${esc(label)}</span>`;
+
+      const EXC = {
+        unfilled_shift: ["Unfilled shift", "bad"],
+        missed_checkin: ["Missed check-in", "bad"],
+        late_checkin: ["Late check-in", "warn"],
+        missed_patrol: ["Missed patrol", "bad"],
+        no_patrol: ["No patrol", "bad"],
+      };
+
+      function statusFor(start, end, att) {
+        const now = Date.now();
+        if (att && att.check_out_at) return ["Checked out", "ok"];
+        if (att) return att.status === "late" ? ["On duty (late)", "warn"] : ["On duty", "ok"];
+        if (new Date(start).getTime() > now) return ["Upcoming", "warn"];
+        if (new Date(end).getTime() < now) return ["Missed check-in", "bad"];
+        return ["Not checked in", "bad"];
+      }
+
+      // ---------- Staff ----------
+      async function loadStaff() {
+        const { data: s, error } = await supabaseClient.rpc("dashboard_summary");
+        if (error) { showMsg(msg, friendlyError(error), false); return; }
+        const done = s.rounds_completed;
+        const missed = s.rounds_incomplete;
+        const pct = done + missed ? Math.round((100 * done) / (done + missed)) + "%" : "–";
+        $("stats").innerHTML =
+          stat(s.guards_on_duty, "Guards on duty") +
+          stat(s.upcoming_shifts, "Upcoming shifts") +
+          stat(s.unfilled_upcoming, "Unfilled shifts") +
+          stat(pct, "Patrol completion (7 days)") +
+          stat(s.open_incidents, "Unresolved incidents") +
+          stat(s.exceptions, "Exceptions (7 days)");
+
+        $("excCard").hidden = false;
+        await Promise.all([loadTodayStaff(), loadExceptions()]);
+      }
+
+      async function loadTodayStaff() {
+        const startToday = new Date();
+        startToday.setHours(0, 0, 0, 0);
+        const startTomorrow = new Date(startToday);
+        startTomorrow.setDate(startTomorrow.getDate() + 1);
+
+        const { data, error } = await supabaseClient
+          .from("shifts")
+          .select("id, start_time, end_time, site:client_sites(site_name), assignments:shift_assignments(assignment_status, guard:guards(profile:profiles(full_name)), attendance(check_in_at, check_out_at, status))")
+          .neq("status", "cancelled")
+          .lt("start_time", startTomorrow.toISOString())
+          .gt("end_time", startToday.toISOString())
+          .order("start_time");
+        if (error) {
+          $("shiftRows").innerHTML = `<tr><td colspan="4" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+
+        const rows = [];
+        data.forEach((sh) => {
+          const site = sh.site?.site_name;
+          const time = `${fmtTime(sh.start_time)} – ${fmtTime(sh.end_time)}`;
+          const active = sh.assignments.filter((a) => a.assignment_status === "assigned");
+          if (!active.length) {
+            rows.push({ site, time, guard: "—", st: ["Unfilled", "bad"] });
+          } else {
+            active.forEach((a) => rows.push({
+              site, time,
+              guard: a.guard?.profile?.full_name || "—",
+              st: statusFor(sh.start_time, sh.end_time, one(a.attendance)),
+            }));
+          }
+        });
+        renderShifts(rows);
+      }
+
+      async function loadExceptions() {
+        const { data, error } = await supabaseClient.rpc("exceptions_overview", { p_days: 7 });
+        if (error) {
+          $("excRows").innerHTML = `<tr><td colspan="4" class="status bad">${esc(friendlyError(error))}</td></tr>`;
+          return;
+        }
+        if (!data.length) {
+          $("excRows").innerHTML = '<tr><td colspan="4" class="muted">No exceptions in the last 7 days.</td></tr>';
+          return;
+        }
+        $("excRows").innerHTML = data.slice(0, 5).map((x) => `<tr>
+          <td>${badge(EXC[x.type] || [x.type, "warn"])}</td>
+          <td>${esc(x.site_name)}</td>
+          <td>${esc(x.guard_name || "—")}</td>
+          <td>${esc(fmtDateTime(x.occurred_at))}</td></tr>`).join("");
+      }
+
+      // ---------- Guard ----------
+      async function loadGuard() {
+        $("shiftsTitle").textContent = "My upcoming shifts";
+        const [shiftsRes, incRes] = await Promise.all([
+          supabaseClient.from("shift_assignments")
+            .select("id, shift:shifts(start_time, end_time, status, site:client_sites(site_name)), attendance(check_in_at, check_out_at, status)")
+            .eq("assignment_status", "assigned"),
+          supabaseClient.from("incidents").select("status"),
+        ]);
+        const err = shiftsRes.error || incRes.error;
+        if (err) { showMsg(msg, friendlyError(err), false); return; }
+
+        const upcoming = shiftsRes.data
+          .filter((a) => a.shift && a.shift.status !== "cancelled" &&
+                         new Date(a.shift.end_time).getTime() > Date.now())
+          .sort((a, b) => new Date(a.shift.start_time) - new Date(b.shift.start_time));
+        const openInc = incRes.data.filter((i) => i.status !== "resolved").length;
+
+        $("stats").innerHTML = stat(upcoming.length, "My upcoming shifts") +
+                               stat(openInc, "My open incidents");
+
+        renderShifts(upcoming.slice(0, 10).map((a) => ({
+          site: a.shift.site?.site_name,
+          time: `${fmtDateTime(a.shift.start_time)} – ${fmtTime(a.shift.end_time)}`,
+          guard: profile.full_name,
+          st: statusFor(a.shift.start_time, a.shift.end_time, one(a.attendance)),
+        })));
+      }
+
+      function renderShifts(rows) {
+        if (!rows.length) {
+          $("shiftRows").innerHTML = '<tr><td colspan="4" class="muted">No shifts to show.</td></tr>';
+          return;
+        }
+        $("shiftRows").innerHTML = rows.map((r) => `<tr>
+          <td>${esc(r.site)}</td><td>${esc(r.time)}</td><td>${esc(r.guard)}</td>
+          <td>${badge(r.st)}</td></tr>`).join("");
+      }
+
+      if (isGuard) await loadGuard();
+      else await loadStaff();
+    });
+  </script>
+</body>
 </html>
